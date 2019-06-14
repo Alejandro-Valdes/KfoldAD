@@ -14,7 +14,7 @@ from keras.utils import to_categorical
 from keras.preprocessing.image import ImageDataGenerator, load_img
 from keras.preprocessing.image import img_to_array
 from keras.applications.imagenet_utils import decode_predictions
-from keras.models import Sequential, Model 
+from keras.models import Sequential, Model
 from keras.layers import Dropout, Flatten, Dense, GlobalAveragePooling2D
 from keras.callbacks import ModelCheckpoint, LearningRateScheduler, TensorBoard, EarlyStopping, ReduceLROnPlateau
 from keras import optimizers
@@ -27,7 +27,15 @@ from sklearn.metrics import confusion_matrix
 import timeit
 
 def clean_folders():
-    paths = ['./K-Fold/Axial/T2_1/train/AD/', './K-Fold/Axial/T2_1/train/NC/', './K-Fold/Axial/T2_1/validate/AD/', './K-Fold/Axial/T2_1/validate/NC/']
+    paths = ['./K-Fold/Axial/T2_1/train/AD/',
+        './K-Fold/Axial/T2_1/train/NC/',
+        './K-Fold/Axial/T2_1/train/sMCI/',
+        './K-Fold/Axial/T2_1/train/pMCI/',
+        './K-Fold/Axial/T2_1/validate/AD/',
+        './K-Fold/Axial/T2_1/validate/NC/',
+        './K-Fold/Axial/T2_1/validate/sMCI/',
+        './K-Fold/Axial/T2_1/validate/pMCI/',]
+
     for path in paths:
         files = os.listdir(path)
         for f in files:
@@ -72,12 +80,20 @@ for run in range(10):
                 copyfile(all_path + X[i], train_path + 'AD/' + X[i])
             elif(Y[i] == 'NC'):
                 copyfile(all_path + X[i], train_path + 'NC/' + X[i])
+            elif(Y[i] == 'pMCI'):
+                copyfile(all_path + X[i], train_path + 'pMCI/' + X[i])
+            elif(Y[i] == 'sMCI'):
+                copyfile(all_path + X[i], train_path + 'sMCI/' + X[i])
 
         for i in test_index:
             if(Y[i] == 'AD'):
                 copyfile(all_path + X[i], validate_path + 'AD/' + X[i])
             elif(Y[i] == 'NC'):
                 copyfile(all_path + X[i], validate_path + 'NC/' + X[i])
+            elif(Y[i] == 'pMCI'):
+                copyfile(all_path + X[i], validate_path + 'pMCI/' + X[i])
+            elif(Y[i] == 'sMCI'):
+                copyfile(all_path + X[i], validate_path + 'sMCI/' + X[i])
 
         nTrain = len(train_index)
         nVal = len(test_index)
@@ -92,7 +108,7 @@ for run in range(10):
 
         vgg_model = vgg16.VGG16(weights="imagenet", include_top=False, input_shape=(224, 224, 3))
 
-        nClasses = 2
+        nClasses = 4
         batch_size = 20
 
         for layer in vgg_model.layers[:-4]:
@@ -105,14 +121,16 @@ for run in range(10):
         x = Dropout(0.5)(x)
         x = Dense(512, activation="relu")(x)
         predictions = Dense(nClasses, activation="softmax")(x)
+        x = Dropout(0.5)(x)
+        x = Dense(512, activation="relu")(x)
 
         model = Model(inputs = vgg_model.input, outputs = predictions)
 
-        model.compile(loss = "categorical_crossentropy", 
-            optimizer = optimizers.RMSprop(lr=2e-4),
+        model.compile(loss = "categorical_crossentropy",
+            optimizer = optimizers.RMSprop(lr=1e-4),
             metrics=["acc"])
 
-        # Initiate the train and test generators with data Augumentation 
+        # Initiate the train and test generators with data Augumentation
         train_datagen = ImageDataGenerator(rescale=1./255)
 
         test_datagen = ImageDataGenerator(rescale=1./255)
@@ -120,36 +138,37 @@ for run in range(10):
         train_generator = train_datagen.flow_from_directory(
         train_dir,
         target_size = (224, 224),
-        batch_size = batch_size, 
+        batch_size = batch_size,
         class_mode = "categorical",
         shuffle=True)
 
         validation_generator = test_datagen.flow_from_directory(
         validation_dir,
         target_size = (224, 224),
-        batch_size = batch_size, 
+        batch_size = batch_size,
         class_mode = "categorical",
         shuffle=True)
 
-        model_save_name = "vgg16_R"+str(run)+"_K"+ str(currK) +".h5"
+        model_save_name = "./weights/vgg16_R"+str(run)+"_K"+ str(currK) +".h5"
 
-        checkpoint = ModelCheckpoint(model_save_name, 
-            monitor='val_acc', 
-            verbose=1, 
-            save_best_only=True, 
-            save_weights_only=False, 
-            mode='auto', 
+        checkpoint = ModelCheckpoint(model_save_name,
+            monitor='val_acc',
+            verbose=1,
+            save_best_only=True,
+            save_weights_only=False,
+            mode='auto',
             period=1)
 
-        early = EarlyStopping(monitor='val_acc', 
-            min_delta=0.001, 
-            patience=8, 
-            verbose=1, 
+        early = EarlyStopping(monitor='val_acc',
+            min_delta=0.001,
+            patience=10,
+            verbose=1,
+            restore_best_weights=True,
             mode='auto')
 
         #save model
         model_json = model.to_json()
-        with open("vgg16_model_R"+str(run)+"_K"+ str(currK) +".json", "w") as json_file:
+        with open("./models/vgg16_model_R"+str(run)+"_K"+ str(currK) +".json", "w") as json_file:
             json_file.write(model_json)
 
         history = model.fit_generator(
@@ -172,7 +191,7 @@ for run in range(10):
         # Get the predictions from the model using the generator
         predictions = model.predict_generator(validation_generator, steps=validation_generator.samples/validation_generator.batch_size,verbose=1)
         predicted_classes = np.argmax(predictions,axis=1)
-         
+
         errors = np.where(predicted_classes != ground_truth)[0]
         print("No of errors = {}/{}".format(len(errors),validation_generator.samples))
 
@@ -185,7 +204,7 @@ for run in range(10):
 
         [test_loss, test_acc] = model.evaluate_generator(validation_generator, nb_samples/batch_size)
 
-        print("Evaluation result on Test Data : Loss = {}, accuracy = {}".format(historytest_loss, test_acc))
+        print("Evaluation result on Test Data : Loss = {}, accuracy = {}".format(test_loss, test_acc))
 
         results.append({'loss': test_loss, 'acc': test_acc})
 
@@ -205,18 +224,30 @@ for run in range(10):
 
         currK += 1
 
+def getFinalPred(AD, NC, pMCI, sMCI):
+    preds = {'AD': AD, 'NC': NC, 'pMCI': pMCI, 'sMCI': sMCI}
+
+    return max(preds, key=preds.get)
+
+
 correct = 0
-             
+
 for img in ensemble_predictions:
     AD = 0
     NC = 0
+    pMCI = 0
+    sMCI = 0
     for pred in ensemble_predictions[img]['predictions']:
         if pred == 'AD':
             AD += 1
         elif pred == 'NC':
             NC += 1
+        elif pred == 'pMCI':
+            pMCI += 1
+        elif pred == 'sMCI':
+            sMCI += 1
 
-    ensemble_predictions[img]['final_pred'] = 'AD' if AD >= NC else 'NC'
+    ensemble_predictions[img]['final_pred'] = getFinalPred(AD, NC, pMCI, sMCI)
 
     if ensemble_predictions[img]['final_pred'] == ensemble_predictions[img]['truth']:
         correct += 1
@@ -224,12 +255,12 @@ for img in ensemble_predictions:
 
 import csv
 
-with open('sag.csv', 'w') as f:  # Just use 'w' mode in 3.x
+with open('results.csv', 'w') as f:  # Just use 'w' mode in 3.x
 
     for p in ensemble_predictions:
         w = csv.DictWriter(f, ensemble_predictions[p].keys())
         w.writeheader()
-        break    
+        break
 
     for p in ensemble_predictions:
         w.writerow(ensemble_predictions[p])
